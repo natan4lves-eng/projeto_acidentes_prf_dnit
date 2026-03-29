@@ -6,7 +6,7 @@ import awswrangler as wr
 print(f"Versão NumPy: {np.__version__}")
 print(f"Versão Pandas: {pd.__version__}")
 print(f"Versão Wrangler: {wr.__version__}")
-from utils import limpar_dados, rename_columns, realizar_merge_limpo, padronizar_campos_join, select_columns, normalizar_colunas, alterar_tipos,read_table, ingest_dataframe_to_s3_parquet, ingest_to_iceberg, executar_glue_job
+from utils import limpar_dados, rename_columns, padronizar_campos_join, select_columns, normalizar_colunas, alterar_tipos,read_table, ingest_dataframe_to_s3_parquet, ingest_to_iceberg, executar_glue_job
 
 
 import sys
@@ -27,8 +27,8 @@ args = getResolvedOptions(sys.argv, params)
 # Atribuindo a variáveis para usar no seu código
 database_bronze = args['db_origem']
 tabela_bronze   = args['tb_origem']
-database_silver = args['db_destino']
-tabela_silver   = args['tb_destino']
+db_destino = args['db_destino']
+tb_destino   = args['tb_destino']
 s3_path         = args['s3_path']
 
 
@@ -95,128 +95,128 @@ if not df_detran.empty:
     print("\nVisualização dos primeiros registos:")
     # print(df_detran_limpo.head())
 
-# Dicionário de mapeamento
+# dicionário de mapeamento
 mapping = {
 
     # =========================
-    # DIM_ESTRADA
+    # dim_estrada
     # =========================
-    "id": "ID_OCORRENCIA",
-    "sentido_via": "NOM_SENTIDO_VIA",
-    "tipo_pista": "NOM_TIPO_PISTA",
-    "tracado_via": "NOM_TRACADO_VIA",
+    "id": "id_ocorrencia",
+    "sentido_via": "nom_sentido_via",
+    "tipo_pista": "nom_tipo_pista",
+    "tracado_via": "nom_tracado_via",
 
     # =========================
-    # DIM_LOCAL
+    # dim_local
     # =========================
-    "uf": "NOM_UF",
-    "br": "NUM_BR",
-    "km": "NUM_KM",
-    "municipio": "NOM_MUNICIPIO",
-    "latitude": "VLR_LATITUDE",
-    "longitude": "VLR_LONGITUDE",
-    "uso_solo": "NOM_USO_SOLO",
+    "uf": "nom_uf",
+    "br": "num_br",
+    "km": "num_km",
+    "municipio": "nom_municipio",
+    "latitude": "vlr_latitude",
+    "longitude": "vlr_longitude",
+    "uso_solo": "nom_uso_solo",
 
     # =========================
-    # DIM_TEMPO
+    # dim_tempo
     # =========================
-    "fase_dia": "NOM_FASE_DIA",
-    "dia_semana": "NOM_DIA_SEMANA",
-    "horario": "NUM_HORARIO",
-    "data_inversa": "DAT_DATA",
+    "fase_dia": "nom_fase_dia",
+    "dia_semana": "nom_dia_semana",
+    "horario": "num_horario",
+    "data_inversa": "dat_data",
 
     # =========================
-    # DIM_PESSOA
+    # dim_pessoa
     # =========================
-    "idade": "NUM_IDADE",
-    "sexo": "NOM_SEXO",
-    "tipo_envolvido": "NOM_TIPO_ENVOLVIDO",
-    "estado_fisico": "NOM_ESTADO_FISICO",
+    "idade": "num_idade",
+    "sexo": "nom_sexo",
+    "tipo_envolvido": "nom_tipo_envolvido",
+    "estado_fisico": "nom_estado_fisico",
 
     # =========================
-    # DIM_CLIMA
+    # dim_clima
     # =========================
-    "condicao_metereologica": "NOM_CONDICAO_METEOROLOGICA",
+    "condicao_metereologica": "nom_condicao_meteorologica",
 
     # =========================
-    # DIM_GRAVIDADE_OCORRENCIA
+    # dim_gravidade_ocorrencia
     # =========================
-    "ordem_tipo_acidente": "NUM_ORDEM_TIPO_ACIDENTE",
-    "causa_principal": "DES_CAUSA_PRINCIPAL",
-    "causa_acidente": "DES_CAUSA_ACIDENTE",
-    "tipo_acidente": "DES_TIPO_ACIDENTE",
-    "classificacao_acidente": "DES_CLASSIFICACAO_ACIDENTE",
-    "ilesos": "QTD_ILESOS",
-    "feridos_leves": "QTD_FERIDOS_LEVES",
-    "feridos_graves": "QTD_FERIDOS_GRAVES",
-    "mortos": "QTD_MORTOS",
+    "ordem_tipo_acidente": "num_ordem_tipo_acidente",
+    "causa_principal": "des_causa_principal",
+    "causa_acidente": "des_causa_acidente",
+    "tipo_acidente": "des_tipo_acidente",
+    "classificacao_acidente": "des_classificacao_acidente",
+    "ilesos": "qtd_ilesos",
+    "feridos_leves": "qtd_feridos_leves",
+    "feridos_graves": "qtd_feridos_graves",
+    "mortos": "qtd_mortos",
 
     # =========================
-    # DIM_VEICULO
+    # dim_veiculo
     # =========================
-    "id_veiculo": "COD_VEICULO",
-    "tipo_veiculo": "NOM_TIPO_VEICULO",
-    "marca": "NOM_MARCA_VEICULO",
-    "ano_fabricacao_veiculo": "NUM_ANO_FABRICACAO"
+    "id_veiculo": "cod_veiculo",
+    "tipo_veiculo": "nom_tipo_veiculo",
+    "marca": "nom_marca_veiculo",
+    "ano_fabricacao_veiculo": "num_ano_fabricacao"
 }
 
-# Aplicar a renomeação no DataFrame
+# aplicar a renomeação no dataframe
 
 df_detran_limpo = rename_columns(df_detran_limpo, mapping=mapping)
 
-# Visualizar as colunas renomeadas
+# visualizar as colunas renomeadas
 print(df_detran_limpo.columns.tolist())
 
 
 
-# Exemplo: "2.8" -> "2"
-df_detran_limpo['NUM_BR'] = df_detran_limpo['NUM_BR'].astype(str).str.split('.').str[0]
-# Exemplo: "2.8" -> "2"
-df_detran_limpo['NUM_KM'] = df_detran_limpo['NUM_KM'].astype(str).str.split(',').str[0]
-df_detran_limpo['NUM_IDADE'] = df_detran_limpo['NUM_IDADE'].astype(str).str.split('.').str[0]
-df_detran_limpo['ID_OCORRENCIA'] = df_detran_limpo['ID_OCORRENCIA'].astype(str).str.split('.').str[0]
-df_detran_limpo['COD_VEICULO'] = df_detran_limpo['COD_VEICULO'].astype(str).str.split('.').str[0]
-df_detran_limpo['QTD_ILESOS'] = df_detran_limpo['QTD_ILESOS'].astype(str).str.split('.').str[0]
-df_detran_limpo['QTD_FERIDOS_LEVES'] = df_detran_limpo['QTD_FERIDOS_LEVES'].astype(str).str.split('.').str[0]
-df_detran_limpo['QTD_FERIDOS_GRAVES'] = df_detran_limpo['QTD_FERIDOS_GRAVES'].astype(str).str.split('.').str[0]
-df_detran_limpo['QTD_MORTOS'] = df_detran_limpo['QTD_MORTOS'].astype(str).str.split('.').str[0]
-df_detran_limpo['NUM_ANO_FABRICACAO'] = df_detran_limpo['NUM_ANO_FABRICACAO'].astype(str).str.split('.').str[0]
+# exemplo: "2.8" -> "2"
+df_detran_limpo['num_br'] = df_detran_limpo['num_br'].astype(str).str.split('.').str[0]
+# exemplo: "2.8" -> "2"
+df_detran_limpo['num_km'] = df_detran_limpo['num_km'].astype(str).str.split(',').str[0]
+df_detran_limpo['num_idade'] = df_detran_limpo['num_idade'].astype(str).str.split('.').str[0]
+df_detran_limpo['id_ocorrencia'] = df_detran_limpo['id_ocorrencia'].astype(str).str.split('.').str[0]
+df_detran_limpo['cod_veiculo'] = df_detran_limpo['cod_veiculo'].astype(str).str.split('.').str[0]
+df_detran_limpo['qtd_ilesos'] = df_detran_limpo['qtd_ilesos'].astype(str).str.split('.').str[0]
+df_detran_limpo['qtd_feridos_leves'] = df_detran_limpo['qtd_feridos_leves'].astype(str).str.split('.').str[0]
+df_detran_limpo['qtd_feridos_graves'] = df_detran_limpo['qtd_feridos_graves'].astype(str).str.split('.').str[0]
+df_detran_limpo['qtd_mortos'] = df_detran_limpo['qtd_mortos'].astype(str).str.split('.').str[0]
+df_detran_limpo['num_ano_fabricacao'] = df_detran_limpo['num_ano_fabricacao'].astype(str).str.split('.').str[0]
 
 
-# Dicionário com os tipos de dados desejados
+# dicionário com os tipos de dados desejados
 tipos = {
-    'ID_OCORRENCIA': 'int',
-    'DAT_DATA': 'date',
-    'NOM_DIA_SEMANA': 'str',
-    'NUM_HORARIO': 'str',
-    'NOM_UF': 'str',
-    'NUM_BR': 'int',
-    'NUM_KM': 'int',
-    'NOM_MUNICIPIO': 'str',
-    'DES_CAUSA_PRINCIPAL': 'str',
-    'DES_CAUSA_ACIDENTE': 'str',
-    'DES_TIPO_ACIDENTE': 'str',
-    'DES_CLASSIFICACAO_ACIDENTE': 'str',
-    'NOM_FASE_DIA': 'str',
-    'NOM_SENTIDO_VIA': 'str',
-    'NOM_CONDICAO_METEOROLOGICA': 'str',
-    'NOM_TIPO_PISTA': 'str',
-    'NOM_TRACADO_VIA': 'str',
-    'NOM_USO_SOLO': 'str',
-    'COD_VEICULO': 'int',
-    'NOM_TIPO_VEICULO': 'str',
-    'NOM_MARCA_VEICULO': 'str',
-    'NOM_TIPO_ENVOLVIDO': 'str',
-    'NUM_ANO_FABRICACAO': 'int',
-    'NOM_ESTADO_FISICO': 'str',
-    'NUM_IDADE': 'int',
-    'NOM_SEXO': 'str',
-    'QTD_ILESOS': 'int',
-    'QTD_FERIDOS_LEVES': 'int',
-    'QTD_FERIDOS_GRAVES': 'int',
-    'QTD_MORTOS': 'int',
-    'VLR_LATITUDE': 'double',
-    'VLR_LONGITUDE': 'double',
+    'id_ocorrencia': 'int',
+    'dat_data': 'date',
+    'nom_dia_semana': 'str',
+    'num_horario': 'str',
+    'nom_uf': 'str',
+    'num_br': 'int',
+    'num_km': 'int',
+    'nom_municipio': 'str',
+    'des_causa_principal': 'str',
+    'des_causa_acidente': 'str',
+    'des_tipo_acidente': 'str',
+    'des_classificacao_acidente': 'str',
+    'nom_fase_dia': 'str',
+    'nom_sentido_via': 'str',
+    'nom_condicao_meteorologica': 'str',
+    'nom_tipo_pista': 'str',
+    'nom_tracado_via': 'str',
+    'nom_uso_solo': 'str',
+    'cod_veiculo': 'int',
+    'nom_tipo_veiculo': 'str',
+    'nom_marca_veiculo': 'str',
+    'nom_tipo_envolvido': 'str',
+    'num_ano_fabricacao': 'int',
+    'nom_estado_fisico': 'str',
+    'num_idade': 'int',
+    'nom_sexo': 'str',
+    'qtd_ilesos': 'int',
+    'qtd_feridos_leves': 'int',
+    'qtd_feridos_graves': 'int',
+    'qtd_mortos': 'int',
+    'vlr_latitude': 'double',
+    'vlr_longitude': 'double',
     'regional': 'str',
     'delegacia': 'str',
     'uop': 'str',
@@ -235,23 +235,25 @@ tipos = {
     'icm': 'double'
 }
 
-# Chamar a função
+# chamar a função
 df_final = alterar_tipos(df_detran_limpo, tipos)
 
-# Exibir o DataFrame resultante
+# exibir o dataframe resultante
 print(df_final.dtypes)
 # print(df_detran_limpo)
 # print(df_detran_limpo.dtypes)
 
-df_final["NOM_SEXO"] = df_final["NOM_SEXO"].str.strip()
+# 1. Padroniza tudo: Maiúsculo e sem espaços sobrando nas pontas
+df_final["nom_sexo"] = df_final["nom_sexo"].str.upper().str.strip()
 
+# 2. Faz a checagem (agora buscando as palavras em MAIÚSCULO)
 df_final.loc[
-    ~df_final["NOM_SEXO"].isin(["Masculino", "Feminino"]),
-    "NOM_SEXO"
-] = "Não Informado"
+    ~df_final["nom_sexo"].isin(["MASCULINO", "FEMININO"]),
+    "nom_sexo"
+] = "NÃO INFORMADO"
 
-df_final["NUM_IDADE"] = (
-    df_final["NUM_IDADE"]
+df_final["num_idade"] = (
+    df_final["num_idade"]
         .astype(str)      # garante que tudo vire string
         .str.strip()      # remove espaços
         .replace("", "-1") # vazio → -1
@@ -260,27 +262,27 @@ df_final["NUM_IDADE"] = (
 )
 
 # regra: idade > 99 vira -1
-df_final.loc[df_final["NUM_IDADE"] > 99, "NUM_IDADE"] = -1
+df_final.loc[df_final["num_idade"] > 99, "num_idade"] = -1
 
 import numpy as np
 
-df_final["IND_FAIXA_ETARIA"] = np.select(
+df_final["ind_faixa_etaria"] = np.select(
     [
-        df_final["NUM_IDADE"] < 0,
-        df_final["NUM_IDADE"] < 18,
-        df_final["NUM_IDADE"] <= 22,
-        df_final["NUM_IDADE"] <= 26,
-        df_final["NUM_IDADE"] <= 30,
-        df_final["NUM_IDADE"] <= 34,
-        df_final["NUM_IDADE"] <= 38,
-        df_final["NUM_IDADE"] <= 42,
-        df_final["NUM_IDADE"] <= 46,
-        df_final["NUM_IDADE"] <= 52,
-        df_final["NUM_IDADE"] <= 56,
-        df_final["NUM_IDADE"] <= 60
+        df_final["num_idade"] < 0,
+        df_final["num_idade"] < 18,
+        df_final["num_idade"] <= 22,
+        df_final["num_idade"] <= 26,
+        df_final["num_idade"] <= 30,
+        df_final["num_idade"] <= 34,
+        df_final["num_idade"] <= 38,
+        df_final["num_idade"] <= 42,
+        df_final["num_idade"] <= 46,
+        df_final["num_idade"] <= 52,
+        df_final["num_idade"] <= 56,
+        df_final["num_idade"] <= 60
     ],
     [
-        "N/I",
+        "n/i",
         "< 18",
         "18 - 22",
         "23 - 26",
@@ -296,52 +298,73 @@ df_final["IND_FAIXA_ETARIA"] = np.select(
     default="> 60"
 )
 
-df_final["NOM_TIPO_ENVOLVIDO"] = (
-    df_final["NOM_TIPO_ENVOLVIDO"]
+df_final["nom_tipo_envolvido"] = (
+    df_final["nom_tipo_envolvido"]
     .astype(str)
     .str.strip()
-    .replace("", "Não Informado")
-    .replace("nan", "Não Informado")
+    .replace("", "não informado")
+    .replace("nan", "não informado")
 )
 
 #-- tratamento clima --
-df_final["NOM_CONDICAO_METEOROLOGICA"] = df_final["NOM_CONDICAO_METEOROLOGICA"].str.strip()
-df_final["NOM_CONDICAO_METEOROLOGICA"] = (
-    df_final["NOM_CONDICAO_METEOROLOGICA"]
+df_final["nom_condicao_meteorologica"] = df_final["nom_condicao_meteorologica"].str.strip()
+df_final["nom_condicao_meteorologica"] = (
+    df_final["nom_condicao_meteorologica"]
     .astype(str)
-    .replace("Ignorado", "Não Informado")
+    .replace("ignorado", "não informado")
 )
 
-df_final["NUM_ANO_FABRICACAO"] = (
-    df_final["NUM_ANO_FABRICACAO"]
+df_final["num_ano_fabricacao"] = (
+    df_final["num_ano_fabricacao"]
     .astype(str)
     .str.strip()
     .str[:4]   # mantém apenas os 4 primeiros caracteres
 )
 
-df_final["NUM_ANO_FABRICACAO"] = (
+df_final["num_ano_fabricacao"] = (
     pd.to_numeric(
-        df_final["NUM_ANO_FABRICACAO"],
+        df_final["num_ano_fabricacao"],
         errors="coerce"
     )
     .fillna(-1)
 )
 
 df_final.loc[
-    df_final["NUM_ANO_FABRICACAO"] <= 1500,
-    "NUM_ANO_FABRICACAO"
+    df_final["num_ano_fabricacao"] <= 1500,
+    "num_ano_fabricacao"
 ] = -1
 
-df_final["NUM_ANO_FABRICACAO"] = df_final["NUM_ANO_FABRICACAO"].astype(int)
-
-
+df_final["num_ano_fabricacao"] = df_final["num_ano_fabricacao"].astype(int)
+df_final['nom_estado_fisico'] = df_final['nom_estado_fisico'].fillna('Não informado')
+df_final['des_classificacao_acidente'] = df_final['des_classificacao_acidente'].fillna('Não informado')
+df_final['des_tipo_acidente'] = df_final['des_tipo_acidente'].fillna('Não informado')
+df_final['des_causa_acidente'] = df_final['des_causa_acidente'].fillna('Não informado')
 
 print("===== df_final =====")
 print(df_final.head(5))
 print(df_final.columns.tolist())
 
+df_final['nom_municipio'] = df_final['nom_municipio'].str.upper()
+df_final['des_causa_principal'] = df_final['des_causa_principal'].str.upper()
+df_final['des_causa_acidente'] = df_final['des_causa_acidente'].str.upper()
+df_final['des_tipo_acidente'] = df_final['des_tipo_acidente'].str.upper()
+df_final['des_classificacao_acidente'] = df_final['des_classificacao_acidente'].str.upper()
+df_final['nom_fase_dia'] = df_final['nom_fase_dia'].str.upper()
+df_final['nom_sentido_via'] = df_final['nom_sentido_via'].str.upper()
+df_final['nom_uso_solo'] = df_final['nom_uso_solo'].str.upper()
+df_final['nom_tipo_envolvido'] = df_final['nom_tipo_envolvido'].str.upper()
+df_final['nom_marca_veiculo'] = df_final['nom_marca_veiculo'].str.upper()
+df_final['nom_tipo_veiculo'] = df_final['nom_tipo_veiculo'].str.upper()
+df_final['nom_sexo'] = df_final['nom_sexo'].str.upper()
+df_final['nom_estado_fisico'] = df_final['nom_estado_fisico'].str.upper()
+df_final['nom_dia_semana'] = df_final['nom_dia_semana'].str.upper()
+df_final['nom_uf'] = df_final['nom_uf'].str.upper()
+df_final['nom_tracado_via'] = df_final['nom_tracado_via'].str.upper()
+df_final['nom_condicao_meteorologica'] = df_final['nom_condicao_meteorologica'].str.upper()
+df_final['nom_tipo_pista'] = df_final['nom_tipo_pista'].str.upper()
+
 # 1. Definimos o Schema (convertendo para minúsculo para garantir compatibilidade)
-# 1. SCHEMA EXATO do seu CREATE TABLE (31 colunas)
+# 1. SCHEMA EXATO do seu CREATE TABLE (33 colunas)
 SCHEMA_FINAL = [
     'id_ocorrencia', 'dat_data', 'nom_dia_semana', 'num_horario', 'nom_uf',
     'num_br', 'num_km', 'nom_municipio', 'des_causa_principal', 'des_causa_acidente',
@@ -360,20 +383,29 @@ df_final.columns = [c.lower() for c in df_final.columns]
 colunas_disponiveis = [c for c in SCHEMA_FINAL if c in df_final.columns]
 df_final = df_final[colunas_disponiveis]
 
-print(f"Colunas prontas para carga: {len(df_final.columns)} de 31 esperadas.")
+print(f"Colunas prontas para carga: {len(df_final.columns)} de 33 esperadas.")
 
 print("Colunas ordenadas no DataFrame:")
 print(df_final.columns.tolist())
 
 
 # 3. Agora chama a carga com o df_final reordenado
-ingest_to_iceberg(
-    df=df_final, 
-    database=database_silver, 
-    table=tabela_silver, 
-    s3_path=f"{s3_path}/{tabela_silver}",
-    partition_cols=["nom_uf"]
-)
+# ingest_to_iceberg(
+#     df=df_final, 
+#     database=database_silver, 
+#     table=tabela_silver, 
+#     s3_path=f"{s3_path}/{tabela_silver}",
+#     partition_cols=["nom_uf"]
+# )
+#carregar_csvs_para_dataframedef 
+ingest_dataframe_to_s3_parquet(
+    df_final, 
+    db_destino, 
+    tb_destino, 
+    s3_path, 
+    partition_cols=None, 
+    mode="overwrite_partitions",
+    description=None)
 
 
 
@@ -387,6 +419,6 @@ ingest_to_iceberg(
 #             partition_cols=["NOM_UF"]   # Particionando por UF para performance no Athena
 #         )
 # Chamada CORRETA para a função minimalista
-print(f'Carregando dados na tabela final {database_silver}.{tabela_silver}')
+print(f'Carregando dados na tabela final {db_destino}.{tb_destino}')
 
 executar_glue_job("glue_processar_gold")

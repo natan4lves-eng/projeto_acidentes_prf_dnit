@@ -88,10 +88,9 @@ ingest_to_iceberg(
     database=database_destino, 
     table=tabela_destino_01, 
     s3_path=f"{s3_path}/{tabela_destino_01}",
-    partition_cols=["nom_uf"]
+    partition_cols=["nom_uf"],
+    merge_cols=['id_localizacao'] # <- O Iceberg vai olhar esse ID. Se existir, ele atualiza a linha inteira. Se não existir, ele insere.
 )
-
-
 
 #------------- DIM TEMPO ------------- 
 DIM_TEMPO = [
@@ -104,6 +103,8 @@ DIM_TEMPO = [
 df_dim_tempo = select_columns(df_origem, DIM_TEMPO)
 df_dim_tempo = agrupar_dataframe(df_dim_tempo, DIM_TEMPO)
 df_dim_tempo = adicionar_id_unico(df_dim_tempo, nome_coluna="id_tempo")
+
+df_dim_tempo['id_tempo'] = df_dim_tempo['id_tempo'].astype('Int64')
 
 # Chamada CORRETA para a função minimalista
 print(f'Carregando dados na tabela final {database_destino}.{tabela_destino_02}')
@@ -118,7 +119,8 @@ ingest_to_iceberg(
     database=database_destino, 
     table=tabela_destino_02, 
     s3_path=f"{s3_path}/{tabela_destino_02}",
-    partition_cols=None
+    partition_cols=None,
+    merge_cols=['id_tempo'] # <- O Iceberg vai olhar esse ID. Se existir, ele atualiza a linha inteira. Se não existir, ele insere.
 )
 
 #------------- DIM CLIMA ------------- 
@@ -142,9 +144,9 @@ ingest_to_iceberg(
     database=database_destino, 
     table=tabela_destino_03, 
     s3_path=f"{s3_path}/{tabela_destino_03}",
-    partition_cols=None
+    partition_cols=None,
+    merge_cols=['id_clima'] # <- O Iceberg vai olhar esse ID. Se existir, ele atualiza a linha inteira. Se não existir, ele insere.
 )
-
 
 
 #------------- DIM CAUSA ACIDENTE ------------- 
@@ -157,6 +159,7 @@ DIM_CAUSA_ACIDENTE = [
 df_dim_causa_acidente = select_columns(df_origem, DIM_CAUSA_ACIDENTE)
 df_dim_causa_acidente = agrupar_dataframe(df_dim_causa_acidente, DIM_CAUSA_ACIDENTE)
 df_dim_causa_acidente = adicionar_id_unico(df_dim_causa_acidente, nome_coluna="id_causa_acidente")
+df_dim_causa_acidente['id_causa_acidente'] = df_dim_causa_acidente['id_causa_acidente'].astype('Int64')
 
 # Chamada CORRETA para a função minimalista
 print(f'Carregando dados na tabela final {database_destino}.{tabela_destino_04}')
@@ -169,7 +172,8 @@ ingest_to_iceberg(
     database=database_destino, 
     table=tabela_destino_04, 
     s3_path=f"{s3_path}/{tabela_destino_04}",
-    partition_cols=None
+    partition_cols=None,
+    merge_cols=['id_causa_acidente'] # <- O Iceberg vai olhar esse ID. Se existir, ele atualiza a linha inteira. Se não existir, ele insere.
 )
 
 
@@ -197,7 +201,8 @@ ingest_to_iceberg(
     database=database_destino, 
     table=tabela_destino_05, 
     s3_path=f"{s3_path}/{tabela_destino_05}",
-    partition_cols=None
+    partition_cols=None,
+    merge_cols=['id_pessoa'] # <- O Iceberg vai olhar esse ID. Se existir, ele atualiza a linha inteira. Se não existir, ele insere.
 )
 
 #------------- DIM VEICULO ------------- 
@@ -216,13 +221,16 @@ print(f'Carregando dados na tabela final {database_destino}.{tabela_destino_06}'
 print(df_dim_veiculo.head(5))
 print(df_dim_veiculo.columns.tolist())
 
+
+
 # 3. Agora chama a carga com o df_final reordenado
 ingest_to_iceberg(
     df=df_dim_veiculo, 
     database=database_destino, 
     table=tabela_destino_06, 
     s3_path=f"{s3_path}/{tabela_destino_06}",
-    partition_cols=None
+    partition_cols=None,
+    merge_cols=['id_veiculo'] # <- O Iceberg vai olhar esse ID. Se existir, ele atualiza a linha inteira. Se não existir, ele insere.
 )
 
 # ==========================================
@@ -240,14 +248,16 @@ df_fato_acidente = df_stg.groupby('id_ocorrencia').agg({
     'vlr_latitude': 'first',
     'vlr_longitude': 'first',
     'nom_condicao_meteorologica': 'first',
+    'des_causa_acidente': 'first',         
+    'des_tipo_acidente': 'first',          
+    'des_classificacao_acidente': 'first', 
+    'nom_estado_fisico': 'first',          
     'qtd_ilesos': 'sum',
     'qtd_feridos_leves': 'sum',
     'qtd_feridos_graves': 'sum',
     'qtd_mortos': 'sum'
 }).reset_index()
 
-print(df_dim_veiculo.head(5))
-print(df_dim_veiculo.columns.tolist())
 
 print('Agrupamento das métricas concluído')
 
@@ -267,10 +277,28 @@ df_fato_acidente = pd.merge(df_fato_acidente, df_dim_localizacao,
 
 df_fato_acidente = pd.merge(df_fato_acidente, df_dim_clima, 
                             on='nom_condicao_meteorologica', how='left')
-                            
+print("Colunas da Fato: ", df_fato_acidente.columns.tolist())
+print("Colunas da Dimensão acidente: ", df_dim_causa_acidente.columns.tolist())                            
 # df_fato_acidente = pd.merge(df_fato_acidente, df_dim_causa_acidente, 
 #                             left_on=['des_tipo_acidente', 'des_classificacao_acidente', 'nom_estado_fisico'], 
 #                             right_on=['des_tipo_acidente', 'des_classificacao_acidente', 'nom_estado_fisico'], how='left')
+
+# 2. Faz o Merge para buscar o ID na Dimensão usando as colunas de texto
+df_fato_acidente = pd.merge(
+    df_fato_acidente, 
+    df_dim_causa_acidente,
+    on=['des_causa_acidente', 'des_tipo_acidente', 'des_classificacao_acidente', 'nom_estado_fisico'], # ou as chaves que estiver usando
+    how='left'
+)
+df_fato_acidente['id_causa_acidente'] = df_fato_acidente['id_causa_acidente'].astype('Int64')
+# # 3. AGORA SIM! Depois que o 'id_causa_acidente' já está dentro da Fato, 
+# # você apaga os textos pesados para a Fato ficar só com números e IDs.
+# df_fato_acidente = df_fato_acidente.drop(columns=[
+#     'des_causa_acidente', 
+#     'des_tipo_acidente', 
+#     'des_classificacao_acidente', 
+#     'nom_estado_fisico'
+# ])
 
 
 print('Junção das Dimensões concluída')
@@ -292,9 +320,10 @@ df_fato_acidente["qtd_total_pessoas_acidente"] = (
 )
 
 df_fato_acidente = adicionar_id_unico(df_fato_acidente, nome_coluna="id_acidente")
+df_fato_acidente['id_ocorrencia'] = df_fato_acidente['id_ocorrencia'].astype('Int64')
 # C. Limpeza e Seleção Final (Garantindo apenas o que vai para a Fato)
 # Mantemos o id_ocorrencia para o MERGE do Iceberg
-cols_finais = ['id_acidente', 'id_tempo', 'id_localizacao', 'id_clima', 'qtd_total_pessoas_acidente',
+cols_finais = ['id_acidente', 'id_tempo', 'id_localizacao', 'id_clima', 'id_causa_acidente', 'id_ocorrencia', 'qtd_total_pessoas_acidente',
                 'qtd_ilesos', 'qtd_feridos_leves', 'qtd_feridos_graves', 'qtd_mortos']
 
 df_fato_acidente = df_fato_acidente[cols_finais]
@@ -318,7 +347,8 @@ ingest_to_iceberg(
     database=database_destino, 
     table=tabela_destino_07, 
     s3_path=f"{s3_path}/{tabela_destino_07}",
-    partition_cols=None
+    partition_cols=None,
+    merge_cols=['id_acidente'] # <- O Iceberg vai olhar esse ID. Se existir, ele atualiza a linha inteira. Se não existir, ele insere.
 )
 
 
@@ -326,12 +356,12 @@ ingest_to_iceberg(
 # ==========================================
 # CARGA 2: FATO_ENVOLVIDOS (Grão: Pessoa/Veículo)
 # ==========================================
-
 print('Iniciando carga da Fato Envolvidos...')
 
 # 1. Preparação da Staging (Cópia dos dados brutos com as colunas necessárias)
 # Diferente da Fato Acidentes, aqui NÃO usamos groupby
 df_fato_env = df_origem.copy()
+print(df_fato_env.columns.tolist())
 
 # 2. Saneamento de Tipos para o Join
 # Garantimos que as colunas de cruzamento sejam do mesmo tipo que nas Dimensões
@@ -347,87 +377,122 @@ df_fato_env = pd.merge(
     on='cod_veiculo', 
     how='left'
 )
+print("Colunas após join com Dim Veículo: ", df_fato_env.columns.tolist())
 
-# Join com Dimensão Pessoa (cruzando por sexo e idade)
+# Join com Dimensão Pessoa (cruzando por TODAS as características do grão)
 df_fato_env = pd.merge(
     df_fato_env, 
     df_dim_pessoa, 
-    left_on=['nom_sexo', 'num_idade'], 
-    right_on=['nom_sexo', 'num_idade'], 
+    on=['nom_sexo', 'num_idade', 'ind_faixa_etaria', 'nom_tipo_envolvido'], 
     how='left'
 )
 
 # 2. SANEAMENTO DE TIPOS (Evita o erro de "merge on object and datetime64")
 df_fato_env['dat_data'] = pd.to_datetime(df_fato_env['dat_data'])
 df_dim_tempo['dat_data'] = pd.to_datetime(df_dim_tempo['dat_data'])
+
 # Na Fato Envolvidos, a data geralmente vem direto da Staging (df_origem)
-df_fato_env = pd.merge(df_fato_env, df_dim_tempo, 
-                            left_on=['dat_data', 'num_horario'], 
-                            right_on=['dat_data', 'num_horario'], how='left')
+df_fato_env = pd.merge(
+    df_fato_env, 
+    df_dim_tempo, 
+    left_on=['dat_data', 'num_horario'], 
+    right_on=['dat_data', 'num_horario'], 
+    how='left'
+)
 
-# 4. CRIAÇÃO DE MÉTRICAS INDIVIDUAIS
-# Criamos um indicador numérico (flag) para facilitar somas no BI
-# df_fato_env['ind_morto'] = df_fato_env['nom_estado_fisico'].apply(lambda x: 1 if x == 'Óbito' else 0)
+print(df_fato_env.head(5))
+print(df_fato_env.columns.tolist())
+
+# 4. CRIAÇÃO DE MÉTRICAS ANALÍTICAS PARA O BI
+
+# A. Métrica de Contagem Base
+df_fato_env['qtd_envolvido'] = 1
+
+# B. Métricas Booleanas de Estado Físico (Baseado na PRF)
+# Usamos .apply para criar as flags de soma rápida
+df_fato_env['ind_obito'] = df_fato_env['nom_estado_fisico'].apply(lambda x: 1 if x in ['Óbito', 'Morto'] else 0)
+df_fato_env['ind_ferido'] = df_fato_env['nom_estado_fisico'].apply(lambda x: 1 if x in ['Ferido Leve', 'Ferido Grave'] else 0)
+df_fato_env['ind_ileso'] = df_fato_env['nom_estado_fisico'].apply(lambda x: 1 if x == 'Ileso' else 0)
+
+# C. Métrica Avançada: Score de Gravidade da Vítima
+def calcular_score_vitima(estado):
+    pesos = {
+        'Ileso': 0, 
+        'Não Informado': 0,
+        'Ferido Leve': 1, 
+        'Ferido Grave': 3, 
+        'Óbito': 10,
+        'Morto': 10
+    }
+    return pesos.get(estado, 0) # Se vier um status bizarro, o peso é 0
+
+df_fato_env['vlr_score_gravidade'] = df_fato_env['nom_estado_fisico'].apply(calcular_score_vitima)
 
 
-# Criando métricas de perfil e comportamento
-# df_fato_env['ind_passageiro'] = df_fato_env['nom_tipo_envolvido'].apply(lambda x: 1 if x == 'Passageiro' else 0)
-# df_fato_env['ind_pedestre'] = df_fato_env['nom_tipo_envolvido'].apply(lambda x: 1 if x == 'Pedestre' else 0)
-# df_fato_env['ind_idoso'] = df_fato_env['num_idade'].apply(lambda x: 1 if x <= 12 else 0)
-# # 1. Métrica para Adolescente (Considerando a faixa comum de 12 a 17 anos)
-# df_fato_env['ind_adolescente'] = df_fato_env['num_idade'].apply(lambda x: 1 if 12 <= x <= 17 else 0)
-# # 2. Métrica para Adulto (Considerando a faixa de 18 a 59 anos)
-# df_fato_env['ind_adulto'] = df_fato_env['num_idade'].apply(lambda x: 1 if 18 <= x <= 59 else 0)
+# C. Nova: Indicador Geral de Vítima (Qualquer pessoa que não saiu ilesa)
+df_fato_env['ind_vitima'] = df_fato_env['nom_estado_fisico'].apply(
+    lambda x: 1 if x in ['Óbito', 'Morto', 'Ferido Leve', 'Ferido Grave'] else 0
+)
 
-# 3. Métrica para Idoso (Que você já possui)
-# df_fato_env['ind_idoso'] = df_fato_env['num_idade'].apply(lambda x: 1 if x >= 60 else 0)
-
-# # Métrica de Peso de Gravidade (Score)
-# def calcular_score(estado):
-#     pesos = {'Ileso': 1, 'Ferido Leve': 2, 'Ferido Grave': 5, 'Morto': 10}
-#     return pesos.get(estado, 0)
-
-# df_fato_env['vlr_score_risco'] = df_fato_env['nom_estado_fisico'].apply(calcular_score)
+# D. Nova: Indicador de Condutor (Métrica de conveniência para taxas)
+df_fato_env['ind_condutor'] = df_fato_env['nom_tipo_envolvido'].apply(
+    lambda x: 1 if x == 'Condutor' else 0
+)
 
 
-# # A. Agrupamos PRIMEIRO para garantir 1 linha por ID_OCORRENCIA
-# # Note que incluímos as colunas que usaremos para o Join no 'first'
-# df_fato_acidente = df_stg.groupby('id_ocorrencia').agg({
-#     'ind_passageiro': 'sum',
-#     'ind_pedestre': 'sum',
-#     'ind_idoso': 'sum',
-#     'ind_adolescente': 'sum',
-#     'ind_adulto': 'sum',
-#     'vlr_score_risco': 'sum'
-# }).reset_index()
+# F. Score de Gravidade da Vítima (Peso analítico)
+def calcular_score_vitima(estado):
+    pesos = {
+        'Ileso': 0, 
+        'Não Informado': 0,
+        'Ferido Leve': 1, 
+        'Ferido Grave': 3, 
+        'Óbito': 10,
+        'Morto': 10
+    }
+    return pesos.get(estado, 0)
 
-df_fato_env = adicionar_id_unico(df_fato_env, nome_coluna="id_env")
+df_fato_env['vlr_score_gravidade'] = df_fato_env['nom_estado_fisico'].apply(calcular_score_vitima)
 
+df_fato_env = adicionar_id_unico(df_fato_env, nome_coluna="id_envolvido")
+df_fato_env['id_ocorrencia'] = df_fato_env['id_ocorrencia'].astype('Int64')
+df_fato_env['id_veiculo'] = df_fato_env['id_veiculo'].astype('Int64')
 # 5. LIMPEZA E SELEÇÃO FINAL
 # Mantemos apenas os IDs e a métrica, descartando os textos (sexo, idade, etc)
 cols_finais_env = [
-    'id_env', 
+    'id_envolvido', 
     'id_veiculo', 
-    'id_tempo', # Assumindo que este é o nome do ID na dim_veiculo
-    'id_pessoa'  # Assumindo que este é o nome do ID na dim_pessoa
-    # 'ind_morto'
+    'id_tempo', 
+    'id_pessoa',
+    'id_ocorrencia',
+    'qtd_envolvido',
+    'ind_vitima',
+    'ind_obito',
+    'ind_ferido',
+    'ind_ileso',
+    'ind_condutor',
+    'vlr_score_gravidade'
 ]
 
 # Filtramos apenas as colunas desejadas
 df_fato_env = df_fato_env[cols_finais_env]
-# df_fato_acidente = df_fato_acidente["id_tempo"].astype("int64")
-print('Junção concluída. Colunas finais da Fato Envolvidos:')
+
+print('Colunas finais da carga da Fato Envolvidos:')
 print(df_fato_env.columns.tolist())
+print('Junção concluída. Preparando para enviar ao Iceberg...')
 
 # 6. ESCRITA NO ICEBERG
 
-# 3. Agora chama a carga com o df_final reordenado
+print(f'Carregando dados na tabela final {database_destino}.{tabela_destino_08}')
+
+# Agora a chamada da carga usa df_fato_env e aponta para a tabela 08
 ingest_to_iceberg(
-    df=df_fato_acidente, 
+    df=df_fato_env, 
     database=database_destino, 
     table=tabela_destino_08, 
     s3_path=f"{s3_path}/{tabela_destino_08}",
-    partition_cols=None
+    partition_cols=None,
+    merge_cols=['id_envolvido'] # Atualiza a linha se o envolvido já existir, senão insere
 )
 
 print('Carga da Fato Envolvidos concluída com sucesso!')

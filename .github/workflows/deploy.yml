@@ -1,0 +1,133 @@
+name: Deploy — Sincronizar scripts no S3 e aplicar Terraform
+
+on:
+  push:
+    branches:
+      - main  # Só executa quando um PR é mergeado na main
+
+jobs:
+  # ==========================================
+  # JOB 1: DEPLOY DOS SCRIPTS GLUE NO S3
+  # ==========================================
+  deploy-scripts:
+    name: Sincronizar scripts Python no S3
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write  # Necessário para OIDC (autenticação sem chave fixa)
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar credenciais AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # OIDC é mais seguro que chaves estáticas (AWS_ACCESS_KEY_ID)
+          # Requer configuração de Identity Provider na AWS — veja o README
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Verificar conectividade com a AWS
+        run: aws sts get-caller-identity
+
+      - name: Sincronizar scripts Glue no S3
+        run: |
+          BUCKET="${{ secrets.S3_GLUE_ASSETS_BUCKET }}"
+
+          echo "Sincronizando scripts para s3://$BUCKET/scripts/"
+
+          aws s3 sync scripts/ s3://$BUCKET/scripts/ \
+            --exclude "*" \
+            --include "*.py" \
+            --delete \
+            --sse AES256
+
+          echo "Scripts sincronizados:"
+          aws s3 ls s3://$BUCKET/scripts/
+
+      - name: Verificar que os scripts chegaram ao S3
+        run: |
+          BUCKET="${{ secrets.S3_GLUE_ASSETS_BUCKET }}"
+          SCRIPTS_ESPERADOS=("utils.py" "01_glue_processa_bronze.py" "02_glue_processa_silver.py" "03_glue_processa_gold.py")
+
+          FALHOU=0
+          for script in "${SCRIPTS_ESPERADOS[@]}"; do
+            if aws s3 ls "s3://$BUCKET/scripts/$script" > /dev/null 2>&1; then
+              echo "  OK  $script"
+            else
+              echo "  ERRO: $script não encontrado no S3"
+              FALHOU=1
+            fi
+          done
+
+          if [ $FALHOU -eq 1 ]; then
+            echo "Um ou mais scripts não foram encontrados após o sync."
+            exit 1
+          fi
+
+  # ==========================================
+  # JOB 2: TERRAFORM APPLY
+  # ==========================================
+  terraform-apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: deploy-scripts  # Só aplica Terraform após os scripts estarem no S3
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar credenciais AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Instalar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '~1.7'
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=datalake-empresa/terraform.tfstate" \
+            -backend-config="region=${{ secrets.AWS_REGION }}" \
+            -backend-config="encrypt=true"
+
+      - name: Terraform Plan
+        working-directory: terraform
+        run: |
+          terraform plan \
+            -var="aws_region=${{ secrets.AWS_REGION }}" \
+            -var="project_name=${{ secrets.PROJECT_NAME }}" \
+            -out=tfplan \
+            -input=false
+
+      - name: Terraform Apply
+        working-directory: terraform
+        run: |
+          terraform apply \
+            -auto-approve \
+            -input=false \
+            tfplan
+
+      - name: Resumo do deploy
+        if: always()
+        run: |
+          echo "### 🚀 Deploy concluído" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Etapa | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Scripts no S3 | ✅ Sincronizados |" >> $GITHUB_STEP_SUMMARY
+          echo "| Terraform Apply | ✅ Aplicado |" >> $GITHUB_STEP_SUMMARY
+          echo "| Região | ${{ secrets.AWS_REGION }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY

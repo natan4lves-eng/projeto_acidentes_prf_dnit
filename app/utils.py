@@ -4,69 +4,46 @@ import glob
 import os
 import unicodedata
 import re
-
 import boto3
 import csv
 from io import BytesIO
 
 
-
 def carregar_csvs_para_dataframe_s3(caminho_s3, header):
-
     """
-    Lê múltiplos CSV diretamente do S3.
-    Exemplo caminho:
-    s3://bucket/pasta/
+    Lê múltiplos CSV diretamente do S3 lidando com encodings brasileiros misturados (UTF-8 e Latin-1).
+    Exemplo caminho: s3://bucket/pasta/
     """
-
-    # -----------------------------
-    # separa bucket e prefixo
-    # -----------------------------
     caminho_sem_prefixo = caminho_s3.replace("s3://", "")
     bucket = caminho_sem_prefixo.split("/")[0]
     prefixo = "/".join(caminho_sem_prefixo.split("/")[1:])
 
     s3 = boto3.client("s3")
-
-    # -----------------------------
-    # lista arquivos
-    # -----------------------------
-    response = s3.list_objects_v2(
-        Bucket=bucket,
-        Prefix=prefixo
-    )
+    response = s3.list_objects_v2(Bucket=bucket, Prefix=prefixo)
 
     if "Contents" not in response:
         print("Nenhum arquivo encontrado.")
         return pd.DataFrame()
 
     arquivos_csv = [
-        obj["Key"]
-        for obj in response["Contents"]
-        if obj["Key"].endswith(".csv")
+        obj["Key"] for obj in response["Contents"] if obj["Key"].endswith(".csv")
     ]
-
     print(f"Foram encontrados {len(arquivos_csv)} CSV(s) no S3.\n")
 
     lista_dataframes = []
 
+    # A ORDEM É CRÍTICA: utf-8 primeiro para atuar como filtro natural.
     encodings_para_testar = [
-        "utf-8-sig",
-        "cp1252",
-        "latin1",
-        "utf-8"
+        "utf-8",
+        "iso-8859-1",
+        "cp1252"
     ]
 
-    # -----------------------------
-    # leitura dos arquivos
-    # -----------------------------
     for key in arquivos_csv:
-
         print(f"Lendo: {key}")
-
         obj = s3.get_object(Bucket=bucket, Key=key)
         conteudo_bytes = obj["Body"].read()
-
+        
         df_lido = None
 
         for encoding in encodings_para_testar:
@@ -83,29 +60,33 @@ def carregar_csvs_para_dataframe_s3(caminho_s3, header):
                     on_bad_lines="warn"
                 )
 
-                if df_temp.columns.astype(str).str.contains("Ã").any():
+                # Verifica se o cabeçalho quebrou com caracteres bizarros (Mojibake)
+                if df_temp.columns.astype(str).str.contains("Ã|ï¿½").any():
                     continue
 
                 df_lido = df_temp
-                print(f"Sucesso com encoding {encoding}")
+                print(f" -> Sucesso com encoding {encoding}")
                 break
 
-            except Exception:
+            except UnicodeDecodeError:
+                # O Python falhou propositalmente ao tentar ler Latin-1 com UTF-8. 
+                # Pula silenciosamente para a próxima tentativa (iso-8859-1).
+                continue
+            except Exception as e:
+                # Pula em caso de outros erros estruturais do arquivo
                 continue
 
         if df_lido is not None:
             df_lido["arquivo_origem"] = key.split("/")[-1]
             lista_dataframes.append(df_lido)
         else:
-            print(f"Erro ao ler {key}")
+            print(f" -> Erro Crítico: Nenhum encoding funcionou para {key}")
 
     if lista_dataframes:
         df_final = pd.concat(lista_dataframes, ignore_index=True)
-
         print("\nResumo final:")
         print("Linhas:", len(df_final))
         print("Colunas:", len(df_final.columns))
-
         return df_final
 
     return pd.DataFrame()
@@ -115,20 +96,20 @@ import re
 
 def normalizar_colunas(df):
 
-    # 1️⃣ remover colunas lixo do CSV
+    # 1 remover colunas lixo do CSV
     df = df.loc[:, ~df.columns.str.contains('^Unnamed', case=False)]
 
-    # 2️⃣ corrigir encoding quebrado (latin1 → utf8)
+    # 2 corrigir encoding quebrado (latin1 → utf8)
     df.columns = (
         df.columns
         .str.encode('latin1', errors='ignore')
         .str.decode('utf-8', errors='ignore')
     )
 
-    # 3️⃣ remover BOM (ï»¿)
+    # 3 remover BOM (ï»¿)
     df.columns = df.columns.str.replace('ï»¿', '', regex=False)
 
-    # 4️⃣ função de normalização padrão DW
+    # 4 função de normalização padrão DW
     def normalize(col):
 
         # remover acentos
@@ -180,7 +161,7 @@ def select_columns(df, columns, verbose=True):
     missing_cols = list(set(columns) - set(df.columns))
 
     if verbose and missing_cols:
-        print(f"⚠️ Colunas não encontradas: {missing_cols}")
+        print(f"!!!! Colunas não encontradas: {missing_cols}")
 
     # mantém ordem do schema
     df = df.loc[:, existing_cols]
@@ -230,7 +211,7 @@ def padronizar_campos_join(df, coluna_data, lat_col="latitude", lon_col="longitu
     """
 
     # =========================
-    # 1️⃣ Padronizar DATA
+    # 1 Padronizar DATA
     # =========================
     df[coluna_data] = pd.to_datetime(
         df[coluna_data],
@@ -239,7 +220,7 @@ def padronizar_campos_join(df, coluna_data, lat_col="latitude", lon_col="longitu
     )
 
     # =========================
-    # 2️⃣ Padronizar COORDENADAS
+    # 2 Padronizar COORDENADAS
     # =========================
     for col in [lat_col, lon_col]:
 
@@ -307,10 +288,10 @@ def realizar_merge_limpo(df_left, df_right, keys_left, keys_right, how='left', v
             porcentagem_match = 0
 
         print(f"--- Relatório de Merge ---")
-        print(f"✅ Merge concluído com sucesso!")
-        print(f"📦 Total de linhas no resultado: {len(df_resultado)}")
-        print(f"🤝 Quantidade de linhas com Match: {qtd_match}")
-        print(f"📊 Porcentagem de Match: {porcentagem_match:.2f}%")
+        print(f"-> Merge concluído com sucesso!")
+        print(f"-> Total de linhas no resultado: {len(df_resultado)}")
+        print(f"-> Quantidade de linhas com Match: {qtd_match}")
+        print(f"-> Porcentagem de Match: {porcentagem_match:.2f}%")
         print(f"--------------------------")
         
     return df_resultado
@@ -379,7 +360,7 @@ def salvar_csv(df, caminho, nome_arquivo, separador=";"):
         encoding="utf-8-sig"  # BOM para Excel reconhecer UTF-8 corretamente
     )
 
-    print(f"✅ Arquivo salvo com sucesso em:\n{caminho_completo}")
+    print(f"-> Arquivo salvo com sucesso em:\n{caminho_completo}")
 
 
 def adicionar_id_unico(df, nome_coluna):
@@ -456,30 +437,30 @@ def alterar_tipos(df, tipos):
                 s = s.str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
                 v_numeric = pd.to_numeric(s, errors='coerce').fillna(0)
                 df[coluna] = v_numeric.round(0).astype('int32')
-                print(f"✅ '{coluna}': int32 processado.")
+                print(f"-> '{coluna}': int32 processado.")
 
             # --- TRATAMENTO PARA FLOAT/DOUBLE ---
             elif 'float' in str(tipo).lower() or 'double' in str(tipo).lower():
                 s = df[coluna].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
                 df[coluna] = pd.to_numeric(s, errors='coerce').astype(float)
-                print(f"✅ '{coluna}': Float/Double processado.")
+                print(f"-> '{coluna}': Float/Double processado.")
 
             # --- TRATAMENTO PARA DATAS (Ajustado para o Wrangler) ---
             elif str(tipo).lower() == 'date':
                 # IMPORTANTE: Mantemos como Datetime64 do Pandas. 
                 # O .dt.date gera objetos 'object/binary' que causam o erro de malformed parquet.
                 df[coluna] = pd.to_datetime(df[coluna], errors='coerce')
-                print(f"✅ '{coluna}': Datetime (compatível com Iceberg) processado.")
+                print(f"-> '{coluna}': Datetime (compatível com Iceberg) processado.")
 
             # --- TRATAMENTO PARA DATETIME ---
             elif 'datetime' in str(tipo).lower():
                 df[coluna] = pd.to_datetime(df[coluna], errors='coerce')
-                print(f"✅ '{coluna}': Datetime processado.")
+                print(f"-> '{coluna}': Datetime processado.")
 
             # --- TRATAMENTO PARA STRING ---
             elif str(tipo).lower() in ['str', 'object', 'varchar']:
                 df[coluna] = df[coluna].astype(str).replace(['nan', 'NaN', 'None', '<NA>'], np.nan)
-                print(f"✅ '{coluna}': String processada.")
+                print(f"-> '{coluna}': String processada.")
 
         except Exception as e:
             print(f"⚠️ Erro na coluna '{coluna}': {e}")
@@ -591,9 +572,11 @@ def read_table(database, table=None, query=None, ctas_approach=False):
             sql=query,
             database=database,
             ctas_approach=ctas_approach,
-            unload_approach=False # Pode ser True para volumes massivos de dados
+            unload_approach=False, # Pode ser True para volumes massivos de dados
+            s3_output="s3://temp-130355226600/temp/" 
         )
-        
+
+
         logger.info(f"Leitura concluída! Linhas recuperadas: {len(df)}")
         return df
         
@@ -614,32 +597,89 @@ import sys
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-def ingest_to_iceberg(df, database, table, s3_path, partition_cols):
+import time
+
+import time
+import pandas as pd
+import awswrangler as wr
+
+def ingest_to_iceberg(df, database, table, s3_path, partition_cols=None, merge_cols=None):
     try:
+        # 1. Cria o database se não existir
         if database not in wr.catalog.databases().values:
             wr.catalog.create_database(name=database)
 
-        # Garantir que dat_data é datetime64[ns] antes de enviar
+        # 2. Trata as datas para o Iceberg
         if 'dat_data' in df.columns:
             df['dat_data'] = pd.to_datetime(df['dat_data'], errors='coerce')
 
-        logger.info(f"Iniciando carga Iceberg em {database}.{table}")
+        tabela_existe = wr.catalog.does_table_exist(database=database, table=table)
 
+        # SE FOR A PRIMEIRA VEZ OU NÃO TIVER CHAVE DE MERGE: Faz apenas INSERT normal
+        if not tabela_existe or not merge_cols:
+            print(f"[{table}] Carga Inicial ou Append puro. Nenhuma chave de merge configurada.")
+            wr.athena.to_iceberg(
+                df=df, database=database, table=table,
+                table_location=s3_path, temp_path=f"{s3_path.rstrip('/')}_temp/",
+                partition_cols=partition_cols, keep_files=False,
+                dtype={'dat_data': 'date'} if 'dat_data' in df.columns else None
+            )
+            print(f"[{table}] Sucesso: Tabela criada/atualizada via Append.")
+            return
+
+        # SE A TABELA JÁ EXISTE E TEMOS A CHAVE: Fazemos o UPSERT Dinâmico
+        print(f"[{table}] Tabela existente. Iniciando UPSERT dinâmico...")
+        
+        # A. Cria uma tabela temporária apenas com os dados desta execução
+        tabela_temp = f"{table}_temp_upsert_{int(time.time())}"
+        path_temp = f"{s3_path.rstrip('/')}_temp_upsert/{tabela_temp}"
+        
         wr.athena.to_iceberg(
-            df=df,
-            database=database,
-            table=table,
-            table_location=s3_path,
-            temp_path=f"{s3_path.rstrip('/')}_temp/",
-            partition_cols=partition_cols,
+            df=df, database=database, table=tabela_temp,
+            table_location=path_temp, temp_path=f"{path_temp}_tmp/",
             keep_files=False,
-            dtype={'dat_data': 'date'} # Isso aqui é o que resolve o erro do Athena
+            dtype={'dat_data': 'date'} if 'dat_data' in df.columns else None
         )
         
-        logger.info(f"Sucesso: {database}.{table} processada.")
+        # B. Monta a lógica do SQL MERGE dinamicamente baseado nas colunas do DataFrame
+        condicao_on = " AND ".join([f"destino.{col} = origem.{col}" for col in merge_cols])
+        
+        colunas_update = [col for col in df.columns if col not in merge_cols]
+        
+        # CORREÇÃO AQUI: No Athena, o lado esquerdo do SET não leva o alias 'destino.'
+        set_update = ", ".join([f"{col} = origem.{col}" for col in colunas_update])
+        
+        todas_colunas = ", ".join(df.columns)
+        valores_insert = ", ".join([f"origem.{col}" for col in df.columns])
+        
+        # Monta a query final de atualização
+        query_merge = f"""
+            MERGE INTO {database}.{table} AS destino
+            USING {database}.{tabela_temp} AS origem
+            ON {condicao_on}
+        """
+        
+        # Só faz o UPDATE se existirem colunas além do próprio ID para atualizar
+        if colunas_update:
+            query_merge += f"            WHEN MATCHED THEN UPDATE SET {set_update}\n"
+            
+        query_merge += f"""            WHEN NOT MATCHED THEN
+                INSERT ({todas_colunas})
+                VALUES ({valores_insert})
+        """
+        
+        # C. Executa o Merge no Athena
+        print(f"[{table}] Executando motor do Athena para cruzar os dados...")
+        wr.athena.start_query_execution(sql=query_merge, database=database, wait=True)
+        
+        # D. Exclui a tabela temporária para não gerar lixo no catálogo
+        print(f"[{table}] Limpando arquivos temporários...")
+        wr.athena.start_query_execution(sql=f"DROP TABLE {database}.{tabela_temp}", database=database, wait=True)
+        
+        print(f"[{table}] SUCESSO! Registros atualizados/inseridos dinamicamente.")
 
     except Exception as e:
-        logger.error(f"Erro na carga Iceberg: {str(e)}")
+        print(f"[{table}] ERRO CRÍTICO na carga: {str(e)}")
         raise e
     
 

@@ -1,0 +1,102 @@
+name: Auto PR — Abrir Pull Request para main
+
+on:
+  # Dispara após o workflow de CI completar com sucesso
+  workflow_run:
+    workflows:
+      - "CI — Validação do Pipeline"
+    types:
+      - completed
+    branches-ignore:
+      - main
+
+jobs:
+  open-pr:
+    name: Criar PR automático para main
+    runs-on: ubuntu-latest
+
+    # Só abre o PR se o CI passou — não abre PR de código quebrado
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+        with:
+          # Faz checkout da branch que disparou o CI (não da main)
+          ref: ${{ github.event.workflow_run.head_branch }}
+          fetch-depth: 0
+
+      - name: Verificar se já existe PR aberto para esta branch
+        id: check_pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="${{ github.event.workflow_run.head_branch }}"
+          PR_COUNT=$(gh pr list \
+            --base main \
+            --head "$BRANCH" \
+            --state open \
+            --json number \
+            --jq 'length')
+
+          echo "prs_abertos=$PR_COUNT" >> $GITHUB_OUTPUT
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+          echo "Branch: $BRANCH | PRs abertos: $PR_COUNT"
+
+      - name: Montar título e corpo do PR
+        id: pr_meta
+        run: |
+          BRANCH="${{ steps.check_pr.outputs.branch }}"
+          SHA="${{ github.event.workflow_run.head_sha }}"
+          SHA_CURTO="${SHA:0:7}"
+
+          # Título: usa o nome da branch formatado
+          TITULO="[Auto PR] ${BRANCH} → main (${SHA_CURTO})"
+
+          echo "titulo=$TITULO" >> $GITHUB_OUTPUT
+          echo "sha_curto=$SHA_CURTO" >> $GITHUB_OUTPUT
+
+      - name: Abrir PR automático
+        if: ${{ steps.check_pr.outputs.prs_abertos == '0' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="${{ steps.check_pr.outputs.branch }}"
+          TITULO="${{ steps.pr_meta.outputs.titulo }}"
+          SHA_CURTO="${{ steps.pr_meta.outputs.sha_curto }}"
+
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "$TITULO" \
+            --body "## Pull Request Automático
+
+          > Gerado automaticamente após CI passar com sucesso ✅
+
+          ### Detalhes
+          | Campo | Valor |
+          |---|---|
+          | **Branch de origem** | \`$BRANCH\` |
+          | **Commit** | \`$SHA_CURTO\` |
+          | **CI** | ✅ Passou |
+
+          ### Checklist antes do merge
+          - [ ] Revisei os scripts Python modificados
+          - [ ] Revisei os arquivos Terraform modificados
+          - [ ] Testei localmente (se aplicável)
+          - [ ] O \`terraform plan\` foi validado
+
+          ### Próximos passos
+          Após aprovação e merge nesta PR, o workflow de **deploy** será disparado automaticamente, sincronizando os scripts no S3 e aplicando o Terraform.
+          "
+
+          echo "PR criado com sucesso para branch: $BRANCH"
+
+      - name: PR já existe — pular criação
+        if: ${{ steps.check_pr.outputs.prs_abertos != '0' }}
+        run: |
+          echo "PR já existe para a branch ${{ steps.check_pr.outputs.branch }}. Nenhuma ação necessária."
